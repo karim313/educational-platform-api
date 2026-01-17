@@ -1,0 +1,95 @@
+{
+  "info": {
+    "name": "Educational Platform API (Empty Products)",
+    "_postman_id": "educational-platform-empty",
+    "description": "Mock API for educational platform using DummyJSON, empty products list, register users with role",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register User with Role",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type","value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"firstName\":\"Kareem\",\"lastName\":\"Medhat\",\"username\":\"kmed\",\"password\":\"123456\",\"role\":\"student\"}"
+            },
+            "url": { "raw": "{{baseUrl}}/users/add", "host": ["{{baseUrl}}"], "path": ["users","add"] }
+          }
+        },
+        {
+          "name": "Login User",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type","value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"kmed\",\"password\":\"123456\"}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth","login"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Courses",
+      "item": [
+        {
+          "name": "Get All Courses (Empty)",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/products", "host": ["{{baseUrl}}"], "path": ["products"] }
+          },
+          "response": [
+            {
+              "name": "Empty Products Example",
+              "originalRequest": {},
+              "status": "200",
+              "code": 200,
+              "body": "[]"
+            }
+          ]
+        },
+        {
+          "name": "Create Course",
+          "request": {
+            "method": "POST",
+            "header": [{"key":"Content-Type","value":"application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"title\":\"React Basics\",\"description\":\"Learn React\",\"price\":50}"
+            },
+            "url": { "raw": "{{baseUrl}}/products/add", "host": ["{{baseUrl}}"], "path": ["products","add"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Purchase",
+      "item": [
+        {
+          "name": "Add To Cart",
+          "request": {
+            "method": "POST",
+            "header": [{"key":"Content-Type","value":"application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"userId\":1,\"products\":[{\"id\":1,\"quantity\":1}]}"
+            },
+            "url": { "raw": "{{baseUrl}}/carts/add", "host": ["{{baseUrl}}"], "path": ["carts","add"] }
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://dummyjson.com"
+    }
+  ]
+}
