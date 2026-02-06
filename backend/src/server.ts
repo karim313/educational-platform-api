@@ -1,35 +1,34 @@
-import express from 'express';
 import dotenv from 'dotenv';
-import cors from 'cors';
-import connectDB from './config/db';
-import authRoutes from './routes/auth.routes';
-import courseRoutes from './routes/course.routes';
+import path from 'path';
 
-// Load env vars
-dotenv.config();
+// Load env using absolute path to avoid issues with current working directory
+dotenv.config({ path: path.join(__dirname, '../.env') });
 
-// Connect to database
-connectDB();
-
-const app = express();
-
-// Body parser
-app.use(express.json());
-
-// Enable CORS
-app.use(cors());
-
-// Mount routers
-app.use('/api/auth', authRoutes);
-app.use('/api/courses', courseRoutes);
-
-// Welcome route
-app.get('/', (req, res) => {
-    res.json({ message: 'Welcome to the Educational Platform API' });
-});
+import mongoose from 'mongoose';
+import app from './app';
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-    console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
+console.log('🚀 Initializing server components...');
+
+const server = app.listen(PORT, () => {
+    console.log(`✅ SERVER IS LIVE ON PORT: ${PORT}`);
+    console.log(`📡 Healthcheck available at: /health`);
+
+    // Connect to MongoDB AFTER the server starts listening
+    const mongoUri = process.env.MONGO_URI;
+    if (mongoUri) {
+        mongoose.connect(mongoUri)
+            .then(() => console.log('✅ MongoDB Connected'))
+            .catch(err => {
+                console.error('❌ MongoDB Connection Failed:', err);
+            });
+    } else {
+        console.warn('⚠️ MONGO_URI missing');
+    }
+});
+
+// Handle server errors
+server.on('error', (error: any) => {
+    console.error('❌ Server startup error:', error);
 });

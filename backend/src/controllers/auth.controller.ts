@@ -22,18 +22,21 @@ export const register = async (req: Request, res: Response) => {
             return res.status(400).json({ success: false, message: 'User already exists' });
         }
 
-        // Check if an admin already exists
-        const adminExists = await User.findOne({ role: 'admin' });
+        // Admin creation logic
+        let finalRole = role || 'student';
 
-        let finalRole = 'student';
+        if (finalRole === 'admin') {
+            const adminExists = await User.findOne({ role: 'admin' });
 
-        // If no admin exists, we can allow the first registration to be an admin if they requested it
-        // Or if the prompt means "only one admin is allowed", we ensure we don't create a second one.
-        if (role === 'admin') {
+            // If an admin already exists, require a secret key to create another one
             if (adminExists) {
-                return res.status(400).json({ success: false, message: 'An admin already exists. Only one admin is allowed.' });
-            } else {
-                finalRole = 'admin';
+                const secret = req.body.adminSecret;
+                if (secret !== process.env.ADMIN_SECRET) {
+                    return res.status(403).json({
+                        success: false,
+                        message: 'Admin already exists. To create another admin, provide a valid adminSecret.'
+                    });
+                }
             }
         }
 
@@ -70,7 +73,7 @@ export const login = async (req: Request, res: Response) => {
 
         const user: any = await User.findOne({ email }).select('+password');
 
-        if (user && (await user.matchPassword(password))) {
+        if (user && (await user.comparePassword(password))) {
             res.json({
                 success: true,
                 _id: user._id,
@@ -82,6 +85,49 @@ export const login = async (req: Request, res: Response) => {
         } else {
             res.status(401).json({ success: false, message: 'Invalid email or password' });
         }
+    } catch (error) {
+        res.status(500).json({ success: false, message: (error as Error).message });
+    }
+};
+
+// @desc    Get current logged in user
+// @route   GET /api/auth/me
+// @access  Private
+export const getMe = async (req: Request, res: Response) => {
+    try {
+        res.status(200).json({
+            success: true,
+            data: req.user,
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: (error as Error).message });
+    }
+};
+
+// @desc    Temporary Force Reset Password
+// @route   POST /api/auth/reset-password-temp
+// @access  Public (Protected by Secret)
+export const resetPasswordTemp = async (req: Request, res: Response) => {
+    try {
+        const { email, newPassword, secret } = req.body;
+
+        // Simple protection using ADMIN_SECRET or a hardcoded one if preferred
+        const expectedSecret = process.env.ADMIN_SECRET || 'admin123';
+
+        if (secret !== expectedSecret) {
+            return res.status(403).json({ success: false, message: 'Invalid secret key' });
+        }
+
+        const user = await User.findOne({ email });
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        user.password = newPassword;
+        await user.save();
+
+        res.status(200).json({ success: true, message: 'Password reset successful. You can now login.' });
     } catch (error) {
         res.status(500).json({ success: false, message: (error as Error).message });
     }

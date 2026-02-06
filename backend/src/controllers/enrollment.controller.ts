@@ -1,0 +1,238 @@
+import { Request, Response } from 'express';
+import Enrollment from '../models/Enrollment';
+import Course from '../models/Course';
+import Stripe from 'stripe';
+
+let _stripe: Stripe | null = null;
+const getStripe = (): Stripe | null => {
+    if (_stripe) return _stripe;
+
+    const key = process.env.STRIPE_SECRET_KEY;
+    console.log(`🔍 Attempting to load Stripe Key... (Found: ${!!key})`);
+
+    if (key && key !== 'null' && key !== 'undefined' && key !== '') {
+        try {
+            _stripe = new Stripe(key, {
+                apiVersion: '2023-10-16' as any,
+            });
+            console.log('🚀 Stripe initialized successfully');
+            return _stripe;
+        } catch (error) {
+            console.error('❌ Stripe initialization failed:', error);
+            return null;
+        }
+    }
+    return null;
+};
+
+/**
+ * @desc    Purchase/Enroll in a course
+ * @route   POST /api/enrollments/purchase/:courseId
+ * @access  Private
+ */
+export const purchaseCourse = async (req: Request, res: Response) => {
+    try {
+        const courseId = req.params.courseId;
+        const userId = (req as any).user._id;
+        const { paymentMethod, transactionId } = req.body;
+
+        if (!['stripe', 'vodafone_cash'].includes(paymentMethod)) {
+            return res.status(400).json({ success: false, message: 'Please provide a valid payment method (stripe or vodafone_cash)' });
+        }
+
+        // 1. Check if course exists
+        const course = await Course.findById(courseId);
+        if (!course) {
+            return res.status(404).json({ success: false, message: 'Course not found' });
+        }
+
+        // 2. Check if already enrolled
+        const existingEnrollment = await Enrollment.findOne({ user: userId, course: courseId });
+        if (existingEnrollment) {
+            // If it failed or pending, maybe allow retry, but for now:
+            if (existingEnrollment.paymentStatus === 'completed') {
+                return res.status(400).json({ success: false, message: 'Already enrolled in this course' });
+            }
+        }
+
+        // 3. Handle Stripe Payment
+        if (paymentMethod === 'stripe') {
+            const stripeInstance = getStripe();
+            if (!stripeInstance) {
+                return res.status(500).json({
+                    success: false,
+                    message: 'Stripe is currently unavailable on this server. Please ensure the API key is set correctly in settings.'
+                });
+            }
+            const session = await stripeInstance.checkout.sessions.create({
+                payment_method_types: ['card'],
+                line_items: [
+                    {
+                        price_data: {
+                            currency: 'usd',
+                            product_data: {
+                                name: course.title,
+                                description: course.description,
+                            },
+                            unit_amount: Math.round(course.price * 100),
+                        },
+                        quantity: 1,
+                    },
+                ],
+                mode: 'payment',
+                success_url: `${process.env.CLIENT_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${process.env.CLIENT_URL}/payment-cancel`,
+                metadata: {
+                    userId: userId.toString(),
+                    courseId: courseId.toString(),
+                },
+            });
+
+            // Create or update a pending enrollment
+            if (!existingEnrollment) {
+                await Enrollment.create({
+                    user: userId,
+                    course: courseId,
+                    paymentMethod: 'stripe',
+                    paymentStatus: 'pending',
+                    transactionId: session.id,
+                    amount: course.price,
+                });
+            } else {
+                existingEnrollment.transactionId = session.id;
+                existingEnrollment.paymentMethod = 'stripe';
+                existingEnrollment.paymentStatus = 'pending';
+                existingEnrollment.amount = course.price;
+                await existingEnrollment.save();
+            }
+
+            return res.status(200).json({
+                success: true,
+                url: session.url,
+                sessionId: session.id
+            });
+        }
+
+        // 4. Handle Vodafone Cash Payment
+        if (paymentMethod === 'vodafone_cash') {
+            const vcNumber = process.env.VODAFONE_CASH_NUMBER || '01012345678';
+            if (!transactionId) {
+                return res.status(400).json({
+                    success: false,
+                    message: `To enroll, please transfer the course price to Vodafone Cash: ${vcNumber}. Once done, send the Transaction ID here to complete your request.`
+                });
+            }
+
+            let enrollment;
+            if (existingEnrollment) {
+                existingEnrollment.paymentMethod = 'vodafone_cash';
+                existingEnrollment.paymentStatus = 'completed'; // Auto-approve per user request
+                existingEnrollment.transactionId = transactionId;
+                existingEnrollment.amount = course.price;
+                enrollment = await existingEnrollment.save();
+            } else {
+                enrollment = await Enrollment.create({
+                    user: userId,
+                    course: courseId,
+                    paymentMethod: 'vodafone_cash',
+                    paymentStatus: 'completed', // Auto-approve per user request
+                    transactionId: transactionId,
+                    amount: course.price,
+                });
+            }
+
+            return res.status(existingEnrollment ? 200 : 201).json({
+                success: true,
+                message: 'Enrollment successful. You can now access the course.',
+                data: enrollment
+            });
+        }
+
+    } catch (error: any) {
+        if (error.code === 11000) {
+            return res.status(400).json({
+                success: false,
+                message: 'You are already enrolled or have a pending enrollment for this course.'
+            });
+        }
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+export const stripeSuccess = async (req: Request, res: Response) => {
+    try {
+        const { session_id } = req.query;
+        if (!session_id) return res.status(400).json({ success: false, message: 'Session ID is required' });
+
+        const stripeInstance = getStripe();
+        if (!stripeInstance) return res.status(500).json({ success: false, message: 'Stripe not initialized' });
+
+        const session = await stripeInstance.checkout.sessions.retrieve(session_id as string);
+
+        if (session.payment_status === 'paid') {
+            const enrollment = await Enrollment.findOne({ transactionId: session_id as string });
+            if (enrollment) {
+                enrollment.paymentStatus = 'completed';
+                await enrollment.save();
+                return res.status(200).json({ success: true, message: 'Payment confirmed', data: enrollment });
+            }
+        }
+        res.status(400).json({ success: false, message: 'Payment not verified' });
+    } catch (error: any) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * @desc    Get courses the current user is enrolled in
+ * @route   GET /api/enrollments/my-courses
+ * @access  Private
+ */
+export const getMyCourses = async (req: Request, res: Response) => {
+    try {
+        const userId = (req as any).user._id;
+
+        // Only show completed enrollments
+        const enrollments = await Enrollment.find({
+            user: userId,
+            paymentStatus: 'completed'
+        }).populate('course');
+
+        const courses = enrollments.map(enrollment => enrollment.course);
+
+        res.status(200).json({
+            success: true,
+            count: courses.length,
+            data: courses
+        });
+    } catch (error: any) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * @desc    Admin: Verify Vodafone Cash payment
+ * @route   PUT /api/enrollments/verify/:enrollmentId
+ * @access  Private (Admin)
+ */
+export const verifyEnrollment = async (req: Request, res: Response) => {
+    try {
+        const { status } = req.body; // 'completed' or 'failed'
+        const enrollment = await Enrollment.findById(req.params.enrollmentId);
+
+        if (!enrollment) {
+            return res.status(404).json({ success: false, message: 'Enrollment not found' });
+        }
+
+        enrollment.paymentStatus = status;
+        await enrollment.save();
+
+        res.status(200).json({
+            success: true,
+            message: `Enrollment marked as ${status}`,
+            data: enrollment
+        });
+    } catch (error: any) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};

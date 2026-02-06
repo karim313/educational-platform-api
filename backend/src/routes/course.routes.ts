@@ -3,12 +3,18 @@ import {
     getCourses,
     getCourseById,
     createCourse,
+    updateCourse,
     deleteCourse,
-    addPlaylist,
     addVideo,
+    getVideos,
+    getPlaylistVideos,
+    deleteVideo,
+    deleteAllVideos,
+    deleteAllCourses,
 } from '../controllers/course.controller';
 import { protect } from '../middleware/auth';
 import { isAdmin } from '../middleware/isAdmin';
+import { authorize } from '../middleware/authorize';
 
 const router = express.Router();
 
@@ -16,10 +22,18 @@ const router = express.Router();
 router.get('/', getCourses);
 router.get('/:courseId', getCourseById);
 
-// Admin routes
+// Admin/Instructor routes
 router.post('/', protect, isAdmin, createCourse);
+router.put('/:courseId', protect, authorize('admin', 'teacher'), updateCourse);
 router.delete('/:courseId', protect, isAdmin, deleteCourse);
-router.post('/:courseId/playlists', protect, isAdmin, addPlaylist);
-router.post('/:courseId/playlists/:playlistId/videos', protect, isAdmin, addVideo);
+router.delete('/', protect, isAdmin, deleteAllCourses);
+
+// Video management
+router.get('/:courseId/videos', getVideos);
+router.get('/:courseId/playlists/:playlistId/videos', getPlaylistVideos);
+router.post('/:courseId/videos', protect, authorize('admin', 'teacher'), addVideo);
+router.post('/:courseId/playlists/:playlistId/videos', protect, authorize('admin', 'teacher'), addVideo);
+router.delete('/:courseId/videos/:videoId', protect, authorize('admin', 'teacher'), deleteVideo);
+router.delete('/:courseId/videos', protect, authorize('admin', 'teacher'), deleteAllVideos);
 
 export default router;
